@@ -1,0 +1,144 @@
+---
+title: "Mapping Lebanon"
+author: "Daniel K Baissa"
+date: "2/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(googleway)
+library(jsonlite)
+library(mapview)
+```
+
+## R Markdown
+
+My goal in the document is to merge the data from the Voter Database of Lebanon scrapped by David and merge it to a shapefile. We tried matching via admin3 in Arabic and for whatever reason, there was a lot of missing data. Therefore my strategy is to brute force it by searching for each location via the Google api and the googleway library.
+
+I will start by loading the the libraries
+
+
+Now let's load in the data
+
+```{r data}
+# Lebanon_shp <- st_read("Datasets/Lebanon/Cammett_data/voter_nation.shp")
+votreg_full <- readRDS("Data/Voter_Data/votreg_full.RDS")
+```
+
+Next I will create a dataset of distinct admin 2 and 3 names.
+
+```{r location, echo=FALSE}
+
+loc <- votreg_full %>% 
+  select(adm_02_ar, adm_03_ar) %>%
+  distinct(adm_03_ar, .keep_all = TRUE)
+
+```
+
+
+Now I will search these locations. I am sure this is not the most efficient way of doing it, but it works.
+
+
+```{r}
+
+adm2 <- loc[["adm_02_ar"]]
+adm3 <- loc[["adm_03_ar"]]
+
+lat <- c()
+lon <- c()
+for (i in 1:length(adm3)) {
+  res <- google_places(search_string = paste0(adm2[i],"," ,adm3[i], ",", "lebanon"))
+
+    
+    if(length(res[["results"]][["geometry"]][["location"]][["lat"]]) == 1){
+      lat[i] <- res[["results"]][["geometry"]][["location"]][["lat"]]
+    } else { 
+      lat[i]  <- NA
+    }
+    
+
+
+      if(length(res[["results"]][["geometry"]][["location"]][["lng"]]) == 1){
+      lon[i] <- res[["results"]][["geometry"]][["location"]][["lng"]]
+    } else { 
+      lon[i]  <- NA
+    }
+  
+}
+
+df <- cbind(loc, lat, lon)
+
+df <- as.data.frame(df)
+
+sum(is.na(df$lon))/length(df$lon)
+
+Lat_Long_votreg_best_matches <- df
+
+
+```
+
+Now I will save the data.
+
+```{r}
+write_excel_csv(Lat_Long_votreg_best_matches, "Lat_Long_votreg_best_matches_full.csv")
+```
+
+```{r}
+Lat_Long_votreg_best_matches <- read_csv("Lat_Long_votreg_best_matches_full.csv")
+```
+
+Now let's make sure that there are no strange coordinates. When working with the RA Jana, we found some places may not be in Lebanon. So I will double check everything at every step.
+
+```{r}
+
+
+mapview(na.omit(Lat_Long_votreg_best_matches), xcol = "lon", ycol = "lat", crs = 4269, grid = FALSE)
+
+
+```
+
+Now let's dive into the missing data. This time I will loosen the admin 2 restriction. 
+
+```{r}
+
+adm3_2 <- adm3[which(is.na(Lat_Long_votreg_best_matches$lat))]
+
+lat <- c()
+lon <- c()
+for (i in 1:length(adm3_2)) {
+  res <- google_places(search_string = paste0(adm3_2[i], ",", "lebanon"))
+
+    
+    if(length(res[["results"]][["geometry"]][["location"]][["lat"]]) == 1){
+      lat[i] <- res[["results"]][["geometry"]][["location"]][["lat"]]
+    } else { 
+      lat[i]  <- NA
+    }
+    
+
+
+      if(length(res[["results"]][["geometry"]][["location"]][["lng"]]) == 1){
+      lon[i] <- res[["results"]][["geometry"]][["location"]][["lng"]]
+    } else { 
+      lon[i]  <- NA
+    }
+  
+}
+
+
+df <- cbind(adm3_2, lat, lon)
+
+df <- as.data.frame(df)
+
+sum(is.na(df$lon))/length(df$lon)
+
+adm3_3 <- adm3_2[which(is.na(df$lat))]
+
+```
+
+
+```{r}
+write_excel_csv(df, "Lat_Long_votreg_next_best_matches_full.csv")

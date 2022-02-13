@@ -1,0 +1,116 @@
+---
+title: "Mapping Lebanon"
+author: "Daniel K Baissa"
+date: "2/13/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(googleway)
+library(jsonlite)
+library(mapview)
+```
+
+## Intro
+
+My goal in the document is to merge the data from the Voter Database of Lebanon scrapped by David and merge it to a shapefile. We tried matching via admin3 in Arabic and for whatever reason, there was a lot of missing data. Therefore my strategy is to brute force it by searching for each location via the Google api and the googleway library.
+
+I will start by loading the the libraries
+
+
+Now let's load in the data
+
+```{r data, message=FALSE, warning=FALSE}
+Lebanon_shp <- st_read("Data/Lebanon Shapes/lbn_admbnda_adm3_cdr_20200810.shp")
+votreg_full <- readRDS("Data/Voter_Data/votreg_full.RDS")
+Lat_Long_votreg_best_matches <- read_csv("Data/Googled_Data/Lat_Long_votreg_best_matches_full.csv")
+Lat_Long_votreg_next_best_matches <- read_csv("Data/Googled_Data/Lat_Long_votreg_next_best_matches_full.csv")
+```
+
+Next I will create a dataset of distinct admin 2 and 3 names.
+
+```{r location, message=FALSE, warning=FALSE}
+
+loc <- votreg_full %>% 
+  select(adm_02_ar, adm_03_ar) %>%
+  distinct(adm_03_ar, .keep_all = TRUE)
+
+```
+
+
+### Matches with admin 2 and admin3
+
+
+When using the Googleway library I searched with the criteria of admin3, admin2, and Lebanon. Therefore, these should be the best matches. This resulted in `r length(na.omit(Lat_Long_votreg_best_matches$lat))` matches. The matches make up `r length(na.omit(Lat_Long_votreg_best_matches$lat))/length(Lat_Long_votreg_best_matches$lat)*100`% of all cases. 
+
+Now let's make sure that there are no strange coordinates. When working with the RA Jana, we found some places may not be in Lebanon. So I will double check everything at every step.
+
+```{r message=FALSE, warning=FALSE}
+
+
+mapview(na.omit(Lat_Long_votreg_best_matches), xcol = "lon", ycol = "lat", crs = 4269, grid = FALSE)
+
+
+```
+
+
+These seem to have worked. Now I will see how these coordinates map onto the shapefile.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(data = Lebanon_shp) +
+  geom_sf() +
+  geom_point(data = Lat_Long_votreg_best_matches, aes(y = lat, x = lon), color = 'red') +
+    coord_sf(xlim = c(35, 36.65), ylim = c(33, 34.75), expand = TRUE)+
+  theme_classic()+
+  xlab("")+ylab("")
+```
+
+It almost looks like there might be several points per admin 3 zone. So I will zoom in the map in a few places to check.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(data = Lebanon_shp) +
+  geom_sf() +
+  geom_point(data = Lat_Long_votreg_best_matches, aes(y = lat, x = lon), color = 'red') +
+   coord_sf(xlim = c(35.45, 35.55), ylim = c(33.85, 33.95), expand = TRUE)+
+  theme_classic()+
+  xlab("")+ylab("")
+```
+
+
+```{r message=FALSE, warning=FALSE}
+ggplot(data = Lebanon_shp) +
+  geom_sf() +
+  geom_point(data = Lat_Long_votreg_best_matches, aes(y = lat, x = lon), color = 'red') +
+   coord_sf(xlim = c(35.55, 35.65), ylim = c(33.9, 34), expand = TRUE)+
+  theme_classic()+
+  xlab("")+ylab("")
+```
+
+For the most part the coordinates map on well. However, there are some cases where there are multiple points in a single admin 3 shape. Maybe this is because the district boundries changed?
+
+### Matches without admin 2
+
+After searching for the locations with both the admin 2 and admin 3 critera, I searched the remaining misses with just the admin 3 name and Lebanon. This resulted in an additional `r length(na.omit(Lat_Long_votreg_next_best_matches$lat))` matches. Combinded with the best matches it accounts for `r (length(na.omit(Lat_Long_votreg_best_matches$lat))+ length(na.omit(Lat_Long_votreg_next_best_matches$lat)))/length(Lat_Long_votreg_best_matches$lat)*100`% of all cases. 
+
+```{r message=FALSE, warning=FALSE}
+
+mapview(na.omit(Lat_Long_votreg_next_best_matches), xcol = "lon", ycol = "lat", crs = 4269, grid = FALSE)
+
+```
+
+Now we see there are places outside of Lebanon showing up in the data.
+
+These seem to have worked. Now I will see how these coordinates map onto the shapefile.
+
+```{r message=FALSE, warning=FALSE}
+ggplot(data = Lebanon_shp) +
+  geom_sf() +
+  geom_point(data = Lat_Long_votreg_next_best_matches, aes(y = lat, x = lon), color = 'red') +
+  coord_sf(xlim = c(35, 36.65), ylim = c(33, 34.75), expand = TRUE)+
+  theme_classic()+
+  xlab("")+ylab("")
+```
+
