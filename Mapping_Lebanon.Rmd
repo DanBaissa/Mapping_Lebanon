@@ -7,6 +7,8 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+rm(list = ls())
+
 library(tidyverse)
 library(sf)
 library(googleway)
@@ -25,21 +27,138 @@ Now let's load in the data
 
 ```{r data, message=FALSE, warning=FALSE}
 Lebanon_shp <- st_read("Data/Lebanon Shapes/lbn_admbnda_adm3_cdr_20200810.shp")
+st_transform(Lebanon_shp, 4326)
+
+Lebanon_shp2 <- st_read("Data/Cammett_data/voter_nation.shp")
+st_transform(Lebanon_shp2, 4326)
+
 votreg_full <- readRDS("Data/Voter_Data/votreg_full.RDS")
 Lat_Long_votreg_best_matches <- read_csv("Data/Googled_Data/Lat_Long_votreg_best_matches_full.csv")
 Lat_Long_votreg_next_best_matches <- read_csv("Data/Googled_Data/Lat_Long_votreg_next_best_matches_full.csv")
 ```
+### Comparing shapefiles
 
-Next I will create a dataset of distinct admin 2 and 3 names.
+Now that the data is loaded I will compare shapefiles to see how well they match. Hopefully the one with Arabic matches the older shapefile compelety 
 
-```{r location, message=FALSE, warning=FALSE}
+```{r}
+ggplot(data = Lebanon_shp) +
+  geom_sf(color = 'red', alpha = 0) +
+  theme_classic()+
+  geom_sf(data = Lebanon_shp2, color = 'black', alpha = 0) 
+```
 
-loc <- votreg_full %>% 
-  select(adm_02_ar, adm_03_ar) %>%
-  distinct(adm_03_ar, .keep_all = TRUE)
+It looks pretty close but not perfect. Its actually pretty bad to the south. For now let's zoom in to see how bad it might really be.
+
+```{r}
+
+ggplot(data = Lebanon_shp) +
+  geom_sf(color = 'red', alpha = 0) +
+  theme_classic()+
+  geom_sf(data = Lebanon_shp2, color = 'black', alpha = 0) +
+   # coord_sf(xlim = c(35.45, 35.55), ylim = c(33.85, 33.95), expand = TRUE)+
+  coord_sf(xlim = c(35.55, 35.65), ylim = c(33.9, 34), expand = TRUE)+
+  theme_classic()+
+  xlab("")+ylab("")
+```
+
+```{r}
+
+ggplot(data = Lebanon_shp) +
+  geom_sf(color = 'red', alpha = 0) +
+  theme_classic()+
+  geom_sf(data = Lebanon_shp2, color = 'black', alpha = 0) +
+   coord_sf(xlim = c(35.2, 35.8), ylim = c(33.5, 33.95), expand = TRUE)+
+  # coord_sf(xlim = c(35.55, 35.65), ylim = c(33.9, 34), expand = TRUE)+
+  theme_classic()+
+  xlab("")+ylab("")
+```
+
+Its surprisingly good.
+
+Now let's look at the south. Since that is where most of the issues are.
+
+```{r}
+ggplot(data = Lebanon_shp) +
+  geom_sf(color = 'red', alpha = 0) +
+  theme_classic()+
+  geom_sf(data = Lebanon_shp2, color = 'black', alpha = 0) +
+   coord_sf(xlim = c(35, 35.8), ylim = c(33, 33.5), expand = TRUE)+
+  theme_classic()+
+  xlab("")+ylab("")
+```
+
+It's not as bad as I expected, but not great... But given that the shapefile I have has Arabic text, I can at least merge on that. Then I can figure out how to deal with the areas that did not match.
+
+## Aggregating the Data
+
+Now that we know what the data look like we can start aggregating by admin 3 level. I will also add some population percentage variables while doing this.
+
+Let's start by looking for cases where there are only a handful of people from an area
+
+```{r}
+votreg_full %>%
+  group_by(adm_03_ar) %>%
+  summarise(Population_Local = n()) %>% 
+  ungroup %>% 
+  distinct(adm_03_ar, .keep_all = TRUE) %>% 
+  select(Population_Local, adm_03_ar) %>% 
+  ggplot() +
+  geom_col(aes(x = reorder(adm_03_ar, -Population_Local), y = Population_Local))
+```
+
+It looks like there are several places where only a handful of people regestered.
+
+```{r}
+votreg_full %>%
+  group_by(adm_03_ar) %>%
+  summarise(Population_Local = n()) %>% 
+  ungroup %>% 
+  distinct(adm_03_ar, .keep_all = TRUE) %>% 
+  select(Population_Local, adm_03_ar) %>% 
+  filter(Population_Local < 50)
+```
+
+
+```{r}
+
+df <- votreg_full %>%
+  group_by(sect_en, adm_03_ar) %>%
+  summarise(Population_Local = n()) %>%
+  ungroup() %>%
+  group_by(adm_03_ar) %>%
+  mutate(Percentage_Local = (Population_Local/sum(Population_Local))*100) %>%
+  ungroup() %>% 
+  pivot_wider(names_from = sect_en, values_from = c(Percentage_Local, Population_Local))
+
 
 ```
 
+
+
+
+Now I will merge the data on admin 3 matches.
+
+```{r}
+df_final <- merge(df, Lebanon_shp, by.y = "admin3Na_1", by.x = "adm_03_ar", all.x = TRUE)
+
+df_final <- st_as_sf(df_final)
+```
+
+There are `r length(na.omit(df_final$admin3Name))` complete cases when merging the data with the shapefile that contains Arabic
+
+
+Let's map the matches from the voter data to the shapefile vs not matches.
+
+```{r}
+ggplot(data = Lebanon_shp) +
+  geom_sf(color = 'black', alpha = 0) +
+  theme_classic()+
+  geom_sf(data = df_final, fill = 'red', alpha = 1) 
+```
+
+The areas in red are the areas that matched.
+
+Now let's at the admin 3 places that did not match and see if any of the best matches line up with these areas.
 
 ### Matches with admin 2 and admin3
 
@@ -47,6 +166,22 @@ loc <- votreg_full %>%
 When using the Googleway library I searched with the criteria of admin3, admin2, and Lebanon. Therefore, these should be the best matches. This resulted in `r length(na.omit(Lat_Long_votreg_best_matches$lat))` matches. The matches make up `r length(na.omit(Lat_Long_votreg_best_matches$lat))/length(Lat_Long_votreg_best_matches$lat)*100`% of all cases. 
 
 Now let's make sure that there are no strange coordinates. When working with the RA Jana, we found some places may not be in Lebanon. So I will double check everything at every step.
+
+
+```{r}
+
+first_miss <- df_final %>% 
+  filter(is.na(Shape_Area))
+
+first_miss_df <- merge(first_miss, Lat_Long_votreg_best_matches, by.y = "adm_03_ar", by.x = "adm_03_ar", all.x = TRUE)
+
+length(na.omit(first_miss_df$lat))
+sum(is.na(first_miss_df$lat))
+
+```
+Using the Google best matches data, there are `r length(na.omit(first_miss_df$lat))` matches with the unmatched shapefile data. This leaves `r sum(is.na(first_miss_df$lat))` NAs. This means we have a total of `r length(na.omit(df_final$admin3Name)) + length(na.omit(first_miss_df$lat))` complete cases, or `r (length(na.omit(df_final$admin3Name)) + length(na.omit(first_miss_df$lat)))/length(df$adm_03_ar)`% of all of the admin 3 data.
+
+
 
 ```{r message=FALSE, warning=FALSE}
 
@@ -58,6 +193,41 @@ mapview(na.omit(Lat_Long_votreg_best_matches), xcol = "lon", ycol = "lat", crs =
 
 
 These seem to have worked. Now I will see how these coordinates map onto the shapefile.
+
+Let's start by assuming the matches actually match and see how this helps.
+
+```{r}
+ggplot(data = Lebanon_shp) +
+  geom_sf(color = 'black', alpha = 0) +
+  theme_classic()+
+  geom_sf(data = df_final, fill = 'red', alpha = 1) +
+  geom_point(data = first_miss_df, aes(y = lat, x = lon), color = 'blue')
+   
+  
+  
+  # geom_sf(data = df_final, fill = 'red', alpha = 1) +
+  # geom_sf(data = first_miss_sf, fill = 'blue', alpha = 1)
+  
+```
+
+```{r}
+ggplot(data = Lebanon_shp) +
+  geom_sf(color = 'black', alpha = 0) +
+  theme_classic()+
+  geom_sf(data = df_final, fill = 'red', alpha = 1) +
+  geom_point(data = first_miss_df, aes(y = lat, x = lon), color = 'blue')+
+   coord_sf(xlim = c(35.45, 35.55), ylim = c(33.85, 33.95), expand = TRUE)+
+  xlab("")+ylab("")
+```
+
+Now let's see which shapes the searched data account for
+
+```{r}
+
+st_contains(Lebanon_shp, y, sparse = TRUE, prepared = TRUE, ..., model = "open")
+```
+
+
 
 ```{r message=FALSE, warning=FALSE}
 ggplot(data = Lebanon_shp) +
